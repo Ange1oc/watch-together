@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rezka Sync</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 310px;
+      background: #12121f;
+      color: #dde1ea;
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 13px;
+      user-select: none;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #1a1a2e;
+      padding: 11px 14px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border-bottom: 1px solid #252540;
+    }
+    .header-logo {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #e94560;
+      letter-spacing: .3px;
+      flex: 1;
+    }
+    .status-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #444;
+      flex-shrink: 0;
+    }
+    .status-dot.connecting { background: #ff9800; animation: pulse .9s infinite; }
+    .status-dot.connected  { background: #4caf50; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .status-label {
+      font-size: 11px;
+      color: #666;
+    }
+    .status-label.connecting { color: #ff9800; }
+    .status-label.connected  { color: #4caf50; }
+
+    /* ── Sections ── */
+    .section {
+      padding: 11px 14px;
+      border-bottom: 1px solid #1e1e35;
+    }
+
+    label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: #555;
+      margin-bottom: 5px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 7px 10px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 5px;
+      color: #dde1ea;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input[type="text"]:focus { border-color: #e94560; }
+    input[type="text"]::placeholder { color: #3a3a5a; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 7px 12px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background .18s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary   { background: #e94560; color: #fff; }
+    .btn-primary:hover { background: #c9304e; }
+    .btn-secondary { background: #1e2040; color: #aab; }
+    .btn-secondary:hover { background: #272855; }
+    .btn-danger    { background: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover { background: #991b1b; }
+    .btn-full { width: 100%; }
+    .btn-icon { background: none; border: none; cursor: pointer; color: #555; font-size: 12px; padding: 2px 6px; }
+    .btn-icon:hover { color: #aaa; }
+
+    .row { display: flex; gap: 6px; margin-top: 8px; }
+    .row .btn { flex: 1; }
+
+    /* ── Server panel ── */
+    .server-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #555;
+      font-size: 11px;
+      padding: 0;
+      text-decoration: underline;
+    }
+    .server-toggle:hover { color: #888; }
+    .server-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .server-url-display {
+      font-size: 11px;
+      color: #444;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 260px;
+      margin-top: 3px;
+    }
+    .collapsible { display: none; margin-top: 8px; }
+    .collapsible.open { display: block; }
+
+    /* ── Room display ── */
+    .room-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 5px;
+    }
+    .room-id {
+      flex: 1;
+      font-size: 15px;
+      font-weight: 700;
+      color: #e94560;
+      letter-spacing: 2px;
+    }
+
+    /* ── Users list ── */
+    .users-wrap { margin-top: 10px; }
+    .users-title { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: #444; margin-bottom: 5px; }
+    .user-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      color: #99a;
+      font-size: 12px;
+    }
+    .user-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #4caf50;
+      flex-shrink: 0;
+    }
+
+    /* ── Chat ── */
+    .chat-wrap { margin-top: 10px; }
+    .chat-row { display: flex; gap: 6px; }
+    .chat-row input { flex: 1; }
+
+    /* ── Not-on-rezka banner ── */
+    .banner {
+      padding: 16px 14px;
+      text-align: center;
+      color: #555;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .banner a {
+      color: #e94560;
+      text-decoration: none;
+    }
+    .banner a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <span class="header-logo">🎬</span>
+    <h1>Rezka Sync</h1>
+    <span class="status-label" id="status-label">—</span>
+    <div class="status-dot" id="status-dot"></div>
+  </div>
+
+  <!-- Not on rezka banner -->
+  <div id="panel-no-site" class="banner" style="display:none">
+    Откройте <a href="https://rezka-ua.tv" target="_blank">rezka-ua.tv</a><br>
+    и запустите видео, затем подключитесь к комнате.
+  </div>
+
+  <!-- Server settings -->
+  <div id="panel-main" style="display:none">
+
+    <div class="section">
+      <div class="server-row">
+        <label style="margin:0">Сервер синхронизации</label>
+        <button class="server-toggle" id="toggle-server">изменить ▸</button>
+      </div>
+      <div class="collapsible" id="server-panel">
+        <input type="text" id="server-url" placeholder="wss://your-server.railway.app" />
+        <button class="btn btn-secondary btn-full" id="btn-save-server" style="margin-top:6px">Сохранить</button>
+      </div>
+      <div class="server-url-display" id="server-url-display"></div>
+    </div>
+
+    <!-- Disconnected: join / create -->
+    <div id="panel-disconnected" class="section">
+      <label>Имя</label>
+      <input type="text" id="username" placeholder="Ваш никнейм" maxlength="30" />
+
+      <div style="margin-top:9px">
+        <label>ID комнаты</label>
+        <input type="text" id="room-input" placeholder="Вставьте ID или создайте новую" maxlength="32" />
+      </div>
+
+      <div class="row">
+        <button class="btn btn-primary" id="btn-join">Войти</button>
+        <button class="btn btn-secondary" id="btn-create">Создать</button>
+      </div>
+    </div>
+
+    <!-- Connected -->
+    <div id="panel-connected" class="section" style="display:none">
+      <label>Комната</label>
+      <div class="room-box">
+        <span class="room-id" id="current-room-id"></span>
+        <button class="btn-icon" id="btn-copy" title="Скопировать ID">📋</button>
+      </div>
+
+      <div class="users-wrap">
+        <div class="users-title">Участники</div>
+        <div id="users-list"></div>
+      </div>
+
+      <div class="chat-wrap">
+        <div class="chat-row">
+          <input type="text" id="chat-input" placeholder="Написать в чат…" maxlength="300" />
+          <button class="btn btn-secondary" id="btn-send-chat">↵</button>
+        </div>
+      </div>
+
+      <button class="btn btn-danger btn-full" id="btn-disconnect" style="margin-top:10px">
+        Отключиться
+      </button>
+    </div>
+
+  </div><!-- /panel-main -->
+
+  <script src="popup.js"></script>
+</body>
+</html>
