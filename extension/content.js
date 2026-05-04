@@ -1,384 +1,492 @@
 /* ============================================================
-   Rezka Sync — Content Script
-   Runs on rezka-ua.tv, manages WebSocket + video sync logic
+   Video Sync — Content Script  v1.2
+   Works on any site with a <video> element
    ============================================================ */
 (function () {
-  'use strict';
+    'use strict';
 
-  // ─── State ────────────────────────────────────────────────────────────────────
+    if (window._vsync) return;
+    window._vsync = true;
 
-  let ws = null;
-  let wsState = 'disconnected'; // disconnected | connecting | connected
-  let currentRoom = null;
-  let serverUrl = null;
-  let myUsername = null;
-  let userList = [];
-  let isSyncing = false;      // true while applying a remote event (prevents echo)
-  let reconnectTimer = null;
-  let pingInterval = null;
+    // ─── State ───────────────────────────────────────────────────────────────────
+    let ws = null;
+    let wsState = 'disconnected';
+    let currentRoom = null;
+    let serverUrl = null;
+    let myUsername = null;
+    let userList = [];
+    let isSyncing = false;
+    let syncTimer = null;
+    let reconnectTimer = null;
+    let reconnectDelay = 4000;
+    let pingInterval = null;
+    let seekDebounceTimer = null;
+    let notifyDebounceTimer = null;
+    let navDebounceTimer = null;
+    let lastBroadcastUrl = '';
+    const chatLog = [];
+    const MAX_CHAT = 100;
 
-  // ─── Overlay widget (shown while connected) ───────────────────────────────────
-
-  const widget = createWidget();
-  document.body.appendChild(widget);
-
-  // ─── Message listener from popup ─────────────────────────────────────────────
-
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    switch (msg.type) {
-      case 'CONNECT':
-        serverUrl  = msg.serverUrl;
-        currentRoom = msg.room;
-        myUsername  = msg.username;
-        connect();
-        sendResponse({ success: true });
-        break;
-
-      case 'DISCONNECT':
-        permanentDisconnect();
-        sendResponse({ success: true });
-        break;
-
-      case 'GET_STATUS':
-        sendResponse({ state: wsState, room: currentRoom, serverUrl });
-        break;
-
-      case 'GET_USERS':
-        sendResponse({ users: userList });
-        break;
-
-      case 'CHAT':
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'chat', message: msg.message }));
-        }
-        sendResponse({ success: true });
-        break;
+    // ─── Widget (page overlay) ────────────────────────────────────────────────────
+    const widget = buildWidget();
+    function attachWidget() {
+        if (document.body && !document.body.contains(widget))
+            document.body.appendChild(widget);
     }
-    return true; // keep channel open for async sendResponse
-  });
+    attachWidget();
+    new MutationObserver(attachWidget).observe(document.documentElement, { childList: true });
 
-  // ─── WebSocket ────────────────────────────────────────────────────────────────
+    // ─── Messages from popup ──────────────────────────────────────────────────────
+    chrome.runtime.onMessage.addListener((msg, _s, respond) => {
+        switch (msg.type) {
+            case 'CONNECT':
+                serverUrl = msg.serverUrl;
+                currentRoom = msg.room;
+                myUsername = msg.username;
+                reconnectDelay = 4000;
+                connect();
+                respond({ ok: true });
+                break;
 
-  function connect() {
-    if (ws) {
-      ws.onclose = null; // prevent auto-reconnect from old instance
-      ws.close();
-      ws = null;
-    }
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    if (pingInterval)   { clearInterval(pingInterval);  pingInterval   = null; }
+            case 'DISCONNECT':
+                permanentDisconnect();
+                respond({ ok: true });
+                break;
 
-    wsState = 'connecting';
-    notifyPopup();
-    updateWidget();
-
-    // Normalise URL: http(s) → ws(s)
-    const wsUrl = serverUrl.replace(/^http/, 'ws');
-
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (e) {
-      wsState = 'disconnected';
-      notifyPopup();
-      updateWidget();
-      return;
-    }
-
-    ws.onopen = () => {
-      wsState = 'connected';
-      notifyPopup();
-      updateWidget();
-
-      ws.send(JSON.stringify({ type: 'join', room: currentRoom, username: myUsername }));
-
-      // Keep-alive ping every 25 s (helps on Render free tier)
-      pingInterval = setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 25000);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        handleServerMessage(JSON.parse(event.data));
-      } catch { /* ignore malformed */ }
-    };
-
-    ws.onclose = () => {
-      wsState = 'disconnected';
-      if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
-      notifyPopup();
-      updateWidget();
-
-      // Auto-reconnect only if we still have a room configured
-      if (currentRoom && serverUrl) {
-        reconnectTimer = setTimeout(connect, 4000);
-      }
-    };
-
-    ws.onerror = () => {
-      wsState = 'disconnected';
-      notifyPopup();
-      updateWidget();
-    };
-  }
-
-  function permanentDisconnect() {
-    currentRoom = null;
-    serverUrl   = null;
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    if (pingInterval)   { clearInterval(pingInterval);  pingInterval   = null; }
-    if (ws) {
-      ws.onclose = null;
-      ws.close();
-      ws = null;
-    }
-    wsState  = 'disconnected';
-    userList = [];
-    notifyPopup();
-    updateWidget();
-  }
-
-  // ─── Handle messages from server ─────────────────────────────────────────────
-
-  function handleServerMessage(data) {
-    switch (data.type) {
-
-      case 'room_joined': {
-        userList = data.users || [];
-        notifyPopup();
-        updateWidget();
-
-        // Sync to current room position when joining
-        const video = getVideo();
-        if (video && typeof data.currentTime === 'number' && data.currentTime > 2) {
-          applySync(() => {
-            video.currentTime = data.currentTime;
-            if (data.playing) {
-              video.play().catch(() => {});
-            } else {
-              video.pause();
+            case 'GET_STATUS': {
+                const v = getVideo();
+                respond({ state: wsState, room: currentRoom, serverUrl, speed: v ? v.playbackRate : 1, hasVideo: !!v });
+                break;
             }
-          });
+
+            case 'GET_USERS':
+                respond({ users: userList });
+                break;
+
+            case 'GET_CHAT':
+                respond({ log: chatLog });
+                break;
+
+            case 'GET_NAV':
+                respond({ url: location.href, title: document.title });
+                break;
+
+            case 'CHAT': {
+                const text = String(msg.message || '').trim();
+                if (text && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'chat', message: text }));
+                    addChat(myUsername, text, true);
+                }
+                respond({ ok: true });
+                break;
+            }
+
+            case 'SET_SPEED': {
+                const v = getVideo();
+                const spd = Number(msg.speed);
+                if (v && spd > 0 && spd <= 16) {
+                    applySync(() => { v.playbackRate = spd; });
+                    if (ws && ws.readyState === WebSocket.OPEN)
+                        ws.send(JSON.stringify({ type: 'speed', speed: spd }));
+                }
+                respond({ ok: true });
+                break;
+            }
         }
-        break;
-      }
-
-      case 'user_joined':
-        userList = data.users || [];
-        notifyPopup();
-        updateWidget();
-        if (data.username !== myUsername) {
-          showToast(`👤 ${data.username} присоединился`);
-        }
-        break;
-
-      case 'user_left':
-        userList = data.users || [];
-        notifyPopup();
-        updateWidget();
-        showToast(`👤 ${data.username} покинул комнату`);
-        break;
-
-      case 'play': {
-        const video = getVideo();
-        if (video) {
-          applySync(() => {
-            video.currentTime = data.time;
-            video.play().catch(() => {});
-          });
-        }
-        showToast(`▶ ${data.username} нажал воспроизведение`);
-        break;
-      }
-
-      case 'pause': {
-        const video = getVideo();
-        if (video) {
-          applySync(() => {
-            video.currentTime = data.time;
-            video.pause();
-          });
-        }
-        showToast(`⏸ ${data.username} поставил на паузу`);
-        break;
-      }
-
-      case 'seek': {
-        const video = getVideo();
-        if (video) {
-          applySync(() => {
-            video.currentTime = data.time;
-          });
-        }
-        showToast(`⏩ ${data.username} перемотал`);
-        break;
-      }
-
-      case 'chat':
-        showToast(`💬 ${data.username}: ${data.message}`);
-        break;
-
-      case 'pong':
-        break;
-    }
-  }
-
-  // ─── Video listeners ──────────────────────────────────────────────────────────
-
-  function getVideo() {
-    return document.querySelector('video');
-  }
-
-  function setupVideoListeners(video) {
-    if (video._rzsync) return;
-    video._rzsync = true;
-
-    video.addEventListener('play', () => {
-      if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'play', time: video.currentTime }));
+        return true;
     });
 
-    video.addEventListener('pause', () => {
-      if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'pause', time: video.currentTime }));
-    });
+    // ─── WebSocket ────────────────────────────────────────────────────────────────
+    function connect() {
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 
-    video.addEventListener('seeked', () => {
-      if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'seek', time: video.currentTime }));
-    });
-  }
+        wsState = 'connecting';
+        notifyPopup(); updateWidget();
 
-  // Watch for video element (player may load after page)
-  function findAndSetup() {
-    const video = getVideo();
-    if (video) setupVideoListeners(video);
-  }
+        const wsUrl = serverUrl.replace(/^https/, 'wss').replace(/^http(?!s)/, 'ws');
+        try { ws = new WebSocket(wsUrl); }
+        catch {
+            wsState = 'disconnected';
+            notifyPopup(); updateWidget();
+            scheduleReconnect();
+            return;
+        }
 
-  findAndSetup();
-  new MutationObserver(findAndSetup)
-    .observe(document.documentElement, { childList: true, subtree: true });
+        ws.onopen = () => {
+            wsState = 'connected';
+            reconnectDelay = 4000;
+            notifyPopup(); updateWidget();
+            ws.send(JSON.stringify({
+                type: 'join', room: currentRoom, username: myUsername,
+                url: location.href, title: document.title,
+            }));
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN)
+                    ws.send(JSON.stringify({ type: 'ping' }));
+            }, 25000);
+        };
 
-  // ─── Sync helper ─────────────────────────────────────────────────────────────
+        ws.onmessage = e => { try { handleMessage(JSON.parse(e.data)); } catch { } };
 
-  function applySync(fn) {
-    isSyncing = true;
-    try { fn(); } catch { /* ignore */ }
-    setTimeout(() => { isSyncing = false; }, 600);
-  }
+        ws.onclose = () => {
+            wsState = 'disconnected';
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+            notifyPopup(); updateWidget();
+            if (currentRoom && serverUrl) scheduleReconnect();
+        };
 
-  // ─── Popup communication ──────────────────────────────────────────────────────
-
-  function notifyPopup() {
-    chrome.runtime.sendMessage({
-      type:     'STATUS_UPDATE',
-      state:    wsState,
-      room:     currentRoom,
-      serverUrl,
-    }).catch(() => {});
-
-    chrome.runtime.sendMessage({
-      type:  'USERS_UPDATE',
-      users: userList,
-    }).catch(() => {});
-  }
-
-  // ─── Floating widget ──────────────────────────────────────────────────────────
-
-  function createWidget() {
-    const el = document.createElement('div');
-    el.id = 'rzsynс-widget';
-    el.style.cssText = [
-      'position:fixed',
-      'top:70px',
-      'right:16px',
-      'z-index:2147483647',
-      'background:rgba(20,20,35,0.92)',
-      'color:#e0e0e0',
-      'font:13px/1.4 "Segoe UI",Arial,sans-serif',
-      'border-radius:8px',
-      'padding:6px 12px',
-      'display:none',
-      'align-items:center',
-      'gap:8px',
-      'box-shadow:0 2px 12px rgba(0,0,0,0.6)',
-      'pointer-events:none',
-      'border:1px solid rgba(233,69,96,0.4)',
-    ].join(';');
-    return el;
-  }
-
-  function updateWidget() {
-    if (wsState === 'connected' && currentRoom) {
-      const count = userList.length;
-      widget.style.display = 'flex';
-      widget.innerHTML =
-        `<span style="width:8px;height:8px;border-radius:50%;background:#e94560;flex-shrink:0;display:inline-block"></span>` +
-        `<span>SYNC &nbsp;|&nbsp; <b>${escHtml(currentRoom)}</b> &nbsp;|&nbsp; ${count} 👤</span>`;
-    } else if (wsState === 'connecting') {
-      widget.style.display = 'flex';
-      widget.innerHTML =
-        `<span style="width:8px;height:8px;border-radius:50%;background:#ff9800;flex-shrink:0;display:inline-block;animation:rzsync-pulse 1s infinite"></span>` +
-        `<span>Подключение…</span>`;
-      ensurePulseAnim();
-    } else {
-      widget.style.display = 'none';
+        ws.onerror = () => { }; // onclose handles cleanup
     }
-  }
 
-  function ensurePulseAnim() {
-    if (document.getElementById('rzsync-style')) return;
-    const s = document.createElement('style');
-    s.id = 'rzsync-style';
-    s.textContent = '@keyframes rzsync-pulse{0%,100%{opacity:1}50%{opacity:.3}}';
-    document.head.appendChild(s);
-  }
-
-  // ─── Toast notifications ──────────────────────────────────────────────────────
-
-  let toastTimer = null;
-
-  function showToast(text) {
-    let toast = document.getElementById('rzsync-toast');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'rzsync-toast';
-      toast.style.cssText = [
-        'position:fixed',
-        'bottom:90px',
-        'left:50%',
-        'transform:translateX(-50%)',
-        'background:rgba(0,0,0,0.82)',
-        'color:#fff',
-        'padding:8px 20px',
-        'border-radius:20px',
-        'font:14px/1.4 "Segoe UI",Arial,sans-serif',
-        'z-index:2147483647',
-        'pointer-events:none',
-        'transition:opacity .3s',
-        'max-width:80vw',
-        'text-align:center',
-      ].join(';');
-      document.body.appendChild(toast);
+    function permanentDisconnect() {
+        currentRoom = null; serverUrl = null; reconnectDelay = 4000;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
+        wsState = 'disconnected'; userList = [];
+        notifyPopup(); updateWidget();
     }
-    toast.textContent = text;
-    toast.style.opacity = '1';
 
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      toast.style.opacity = '0';
-    }, 3000);
-  }
+    function scheduleReconnect() {
+        reconnectTimer = setTimeout(() => {
+            reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), 30000);
+            connect();
+        }, reconnectDelay);
+    }
 
-  // ─── Util ─────────────────────────────────────────────────────────────────────
+    // ─── Server messages ──────────────────────────────────────────────────────────
+    function handleMessage(data) {
+        switch (data.type) {
 
-  function escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
+            case 'room_joined': {
+                userList = data.users || [];
+                notifyPopup(); updateWidget();
+                const v = getVideo();
+                if (v && typeof data.currentTime === 'number' && data.currentTime > 2) {
+                    applySync(() => {
+                        v.currentTime = data.currentTime;
+                        if (typeof data.speed === 'number' && data.speed > 0)
+                            v.playbackRate = data.speed;
+                        if (data.playing) v.play().catch(() => { });
+                        else v.pause();
+                    });
+                }
+                // If room has a known URL different from ours, suggest it
+                if (data.url && data.url !== location.href) {
+                    showNavSuggestion('\u043a\u043e\u043c\u043d\u0430\u0442\u0430', data.url, data.title || data.url);
+                }
+                // Always push room URL to popup nav info (even if same)
+                chrome.runtime.sendMessage({
+                    type: 'NAVIGATE_UPDATE',
+                    url: data.url || '',
+                    title: data.title || '',
+                    username: '',
+                }).catch(() => { });
+                break;
+            }
+
+            case 'user_joined':
+                userList = data.users || [];
+                notifyPopup(); updateWidget();
+                if (data.username !== myUsername)
+                    toast('\uD83D\uDC64 ' + data.username + ' \u043F\u0440\u0438\u0441\u043E\u0435\u0434\u0438\u043D\u0438\u043B\u0441\u044F');
+                break;
+
+            case 'user_left':
+                userList = data.users || [];
+                notifyPopup(); updateWidget();
+                toast('\uD83D\uDC64 ' + data.username + ' \u043F\u043E\u043A\u0438\u043D\u0443\u043B \u043A\u043E\u043C\u043D\u0430\u0442\u0443');
+                break;
+
+            case 'play': {
+                const v = getVideo();
+                if (v) applySync(() => { v.currentTime = data.time; v.play().catch(() => { }); });
+                toast('\u25B6 ' + data.username + ' \u0432\u043E\u0441\u043F\u0440\u043E\u0438\u0437\u0432\u0435\u0434\u0435\u043D\u0438\u0435');
+                break;
+            }
+
+            case 'pause': {
+                const v = getVideo();
+                if (v) applySync(() => { v.currentTime = data.time; v.pause(); });
+                toast('\u23F8 ' + data.username + ' \u043F\u0430\u0443\u0437\u0430');
+                break;
+            }
+
+            case 'seek': {
+                const v = getVideo();
+                if (v) applySync(() => { v.currentTime = data.time; });
+                toast('\u23E9 ' + data.username + ' \u043F\u0435\u0440\u0435\u043C\u043E\u0442\u0430\u043B');
+                break;
+            }
+
+            case 'speed': {
+                const v = getVideo();
+                const spd = Number(data.speed);
+                if (v && spd > 0) applySync(() => { v.playbackRate = spd; });
+                notifyPopup(); updateWidget();
+                toast('\u26A1 ' + data.username + ' \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C: ' + spd + '\xD7');
+                break;
+            }
+
+            case 'chat':
+                addChat(data.username, data.message, false);
+                toast('\uD83D\uDCAC ' + data.username + ': ' + data.message);
+                break;
+
+            case 'navigate': {
+                const navUrl = String(data.url || '');
+                const navTitle = String(data.title || navUrl);
+                if (navUrl && navUrl !== location.href) {
+                    showNavSuggestion(data.username, navUrl, navTitle);
+                }
+                chrome.runtime.sendMessage({
+                    type: 'NAVIGATE_UPDATE', url: navUrl, title: navTitle, username: data.username,
+                }).catch(() => { });
+                break;
+            }
+
+            case 'pong': break;
+        }
+    }
+
+    function addChat(username, message, mine) {
+        chatLog.push({ username, message, ts: Date.now(), mine });
+        if (chatLog.length > MAX_CHAT) chatLog.shift();
+        chrome.runtime.sendMessage({ type: 'CHAT_UPDATE', log: chatLog }).catch(() => { });
+    }
+
+    // ─── Video detection ──────────────────────────────────────────────────────────
+    function getVideo() {
+        const all = [...document.querySelectorAll('video')];
+        if (!all.length) return null;
+        const visible = all.filter(v => {
+            const r = v.getBoundingClientRect();
+            return r.width > 80 && r.height > 45;
+        });
+        const pool = visible.length ? visible : all;
+        return pool.sort((a, b) => {
+            const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+            return (rb.width * rb.height) - (ra.width * ra.height);
+        })[0];
+    }
+
+    function setupVideo(v) {
+        if (v._vsync) return;
+        v._vsync = true;
+
+        v.addEventListener('play', () => {
+            if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'play', time: v.currentTime }));
+        });
+
+        v.addEventListener('pause', () => {
+            if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'pause', time: v.currentTime }));
+        });
+
+        // Debounced to prevent event storms during buffering
+        v.addEventListener('seeked', () => {
+            if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
+            seekDebounceTimer = setTimeout(() => {
+                if (!isSyncing && ws && ws.readyState === WebSocket.OPEN)
+                    ws.send(JSON.stringify({ type: 'seek', time: v.currentTime }));
+            }, 150);
+        });
+
+        v.addEventListener('ratechange', () => {
+            if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'speed', speed: v.playbackRate }));
+            notifyPopup(); updateWidget();
+        });
+    }
+
+    function findAndSetup() {
+        document.querySelectorAll('video').forEach(setupVideo);
+    }
+    findAndSetup();
+    new MutationObserver(findAndSetup).observe(document.documentElement, { childList: true, subtree: true });
+
+    // ─── Navigation detection ─────────────────────────────────────────────────────
+    function broadcastNavigate() {
+        const url = location.href;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (url === lastBroadcastUrl) return;
+        lastBroadcastUrl = url;
+        ws.send(JSON.stringify({ type: 'navigate', url, title: document.title }));
+        chrome.runtime.sendMessage({ type: 'NAVIGATE_UPDATE', url, title: document.title, username: myUsername }).catch(() => { });
+    }
+
+    function scheduleNavBroadcast() {
+        if (navDebounceTimer) clearTimeout(navDebounceTimer);
+        navDebounceTimer = setTimeout(broadcastNavigate, 800);
+    }
+
+    (function patchHistory() {
+        ['pushState', 'replaceState'].forEach(method => {
+            const orig = history[method];
+            history[method] = function (...args) {
+                const r = orig.apply(this, args);
+                scheduleNavBroadcast();
+                return r;
+            };
+        });
+    })();
+
+    window.addEventListener('popstate', scheduleNavBroadcast);
+    window.addEventListener('hashchange', scheduleNavBroadcast);
+
+    // ─── Sync helper ──────────────────────────────────────────────────────────────
+    function applySync(fn) {
+        if (syncTimer) clearTimeout(syncTimer);
+        isSyncing = true;
+        try { fn(); } catch { }
+        syncTimer = setTimeout(() => { isSyncing = false; }, 1000);
+    }
+
+    // ─── Popup comms (debounced 50ms to batch state changes) ─────────────────────
+    function notifyPopup() {
+        if (notifyDebounceTimer) clearTimeout(notifyDebounceTimer);
+        notifyDebounceTimer = setTimeout(() => {
+            const v = getVideo();
+            chrome.runtime.sendMessage({
+                type: 'STATUS_UPDATE', state: wsState, room: currentRoom,
+                serverUrl, speed: v ? v.playbackRate : 1, hasVideo: !!v,
+            }).catch(() => { });
+            chrome.runtime.sendMessage({ type: 'USERS_UPDATE', users: userList }).catch(() => { });
+        }, 50);
+    }
+
+    // ─── Widget ───────────────────────────────────────────────────────────────────
+    function buildWidget() {
+        const el = document.createElement('div');
+        el.id = 'vsync-widget';
+        el.style.cssText = [
+            'position:fixed', 'top:72px', 'right:16px', 'z-index:2147483647',
+            'background:rgba(13,13,24,0.96)', 'color:#dde1ea',
+            'font:13px/1.5 "Segoe UI",Arial,sans-serif', 'border-radius:10px',
+            'padding:6px 14px', 'display:none', 'align-items:center', 'gap:9px',
+            'box-shadow:0 4px 24px rgba(0,0,0,.8)', 'pointer-events:none',
+            'border:1px solid rgba(233,69,96,.3)', 'backdrop-filter:blur(6px)',
+        ].join(';');
+        return el;
+    }
+
+    function updateWidget() {
+        ensureStyles();
+        if (wsState === 'connected' && currentRoom) {
+            const v = getVideo();
+            const spd = v ? v.playbackRate : 1;
+            const spdPart = spd !== 1 ? ' \xB7 <span style="color:#e94560">' + spd + '\xD7</span>' : '';
+            widget.style.display = 'flex';
+            widget.innerHTML =
+                '<span style="width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 6px #4ade80;flex-shrink:0;display:inline-block"></span>' +
+                '<span><b style="color:#e94560">' + escHtml(currentRoom) + '</b> \xB7 ' + userList.length + ' \uD83D\uDC64' + spdPart + '</span>';
+        } else if (wsState === 'connecting') {
+            widget.style.display = 'flex';
+            widget.innerHTML =
+                '<span style="width:8px;height:8px;border-radius:50%;background:#fb923c;flex-shrink:0;display:inline-block;animation:vsync-pulse 1s infinite"></span>' +
+                '<span style="color:#999">\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u2026</span>';
+        } else {
+            widget.style.display = 'none';
+        }
+    }
+
+    function ensureStyles() {
+        if (document.getElementById('vsync-styles')) return;
+        const s = document.createElement('style');
+        s.id = 'vsync-styles';
+        s.textContent = '@keyframes vsync-pulse{0%,100%{opacity:1}50%{opacity:.2}}';
+        (document.head || document.documentElement).appendChild(s);
+    }
+
+    // ─── Toast queue ──────────────────────────────────────────────────────────────
+    const toastQ = [];
+    let toastBusy = false;
+
+    function toast(text) {
+        toastQ.push(text);
+        if (!toastBusy) nextToast();
+    }
+
+    function nextToast() {
+        if (!toastQ.length) { toastBusy = false; return; }
+        toastBusy = true;
+        const text = toastQ.shift();
+        let el = document.getElementById('vsync-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'vsync-toast';
+            el.style.cssText = [
+                'position:fixed', 'bottom:80px', 'right:16px',
+                'background:rgba(13,13,24,0.96)', 'color:#dde1ea',
+                'padding:8px 14px', 'border-radius:10px',
+                'font:12px/1.5 "Segoe UI",Arial,sans-serif',
+                'z-index:2147483646', 'pointer-events:none',
+                'transition:opacity .25s, transform .25s',
+                'max-width:280px', 'word-break:break-word',
+                'box-shadow:0 4px 16px rgba(0,0,0,.7)',
+                'border:1px solid rgba(255,255,255,.08)',
+            ].join(';');
+            (document.body || document.documentElement).appendChild(el);
+        }
+        el.textContent = text;
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+        setTimeout(() => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(6px)';
+            setTimeout(nextToast, 280);
+        }, 2500);
+    }
+
+    function escHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function escAttr(s) {
+        return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    // ─── Navigation suggestion banner ─────────────────────────────────────────────
+    function showNavSuggestion(fromUser, url, title) {
+        const old = document.getElementById('vsync-nav-banner');
+        if (old) old.remove();
+        ensureStyles();
+
+        const banner = document.createElement('div');
+        banner.id = 'vsync-nav-banner';
+        banner.style.cssText = [
+            'position:fixed', 'top:16px', 'left:50%', 'transform:translateX(-50%)',
+            'z-index:2147483647', 'max-width:400px', 'width:calc(100% - 32px)',
+            'background:rgba(13,13,24,0.97)', 'color:#dde1ea',
+            'border:1px solid rgba(233,69,96,.5)', 'border-radius:12px',
+            'padding:10px 14px', 'box-shadow:0 6px 32px rgba(0,0,0,.9)',
+            'font:13px/1.5 "Segoe UI",Arial,sans-serif',
+            'display:flex', 'align-items:center', 'gap:10px',
+        ].join(';');
+
+        const shortTitle = (title || url).length > 55
+            ? (title || url).slice(0, 52) + '\u2026'
+            : (title || url);
+
+        banner.innerHTML =
+            '<span style="font-size:20px;flex-shrink:0">\uD83C\uDFAC</span>' +
+            '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:11px;color:#888;margin-bottom:1px">' +
+            escHtml(fromUser) + ' \u043F\u0435\u0440\u0435\u0445\u043E\u0434\u0438\u0442 \u043A \u043D\u043E\u0432\u043E\u0439 \u0441\u0435\u0440\u0438\u0438</div>' +
+            '<div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+            escHtml(shortTitle) + '</div>' +
+            '</div>' +
+            '<a href="' + escAttr(url) + '" style="flex-shrink:0;background:#e94560;color:#fff;' +
+            'text-decoration:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:700;">\u041F\u0435\u0440\u0435\u0439\u0442\u0438</a>' +
+            '<button id="vsync-nav-close" style="background:none;border:none;color:#666;cursor:pointer;font-size:18px;padding:0 2px;flex-shrink:0;line-height:1">&times;</button>';
+
+        (document.body || document.documentElement).appendChild(banner);
+        document.getElementById('vsync-nav-close').addEventListener('click', () => banner.remove());
+        setTimeout(() => { if (banner.isConnected) banner.remove(); }, 15000);
+    }
 
 })();

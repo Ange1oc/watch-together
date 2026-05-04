@@ -5,14 +5,14 @@ const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
 
 app.use(cors());
 app.use(express.json());
 
 // rooms: Map<roomId, Set<{ ws, username }>>
 const rooms = new Map();
-// roomStates: Map<roomId, { time, playing, updatedAt }>
+// roomStates: Map<roomId, { time, playing, speed, url, title, updatedAt }>
 const roomStates = new Map();
 
 // ─── HTTP endpoints ────────────────────────────────────────────────────────────
@@ -33,7 +33,15 @@ wss.on('connection', (ws) => {
   let currentRoom = null;
   let username = 'Anonymous';
 
+  // Simple per-connection rate limiter (max 30 events/sec)
+  let msgCount = 0;
+  const rateLimitReset = setInterval(() => { msgCount = 0; }, 1000);
+  const MAX_MSG_PER_SEC = 30;
+
   ws.on('message', (rawData) => {
+    msgCount++;
+    if (msgCount > MAX_MSG_PER_SEC) return; // drop burst
+
     let data;
     try {
       data = JSON.parse(rawData);
@@ -49,6 +57,10 @@ wss.on('connection', (ws) => {
 
         username = String(data.username || 'Anonymous').trim().slice(0, 32);
 
+        // Store url/title from the joiner (first joiner initialises the room URL)
+        const joinUrl = String(data.url || '').slice(0, 2048);
+        const joinTitle = String(data.title || '').slice(0, 256);
+
         // Leave old room
         if (currentRoom) leaveRoom(ws, currentRoom);
 
@@ -61,11 +73,19 @@ wss.on('connection', (ws) => {
         const state = roomStates.get(roomId);
         let currentTime = 0;
         let playing = false;
+        let speed = 1;
+        let roomUrl = joinUrl;
+        let roomTitle = joinTitle;
         if (state) {
           currentTime = state.playing
             ? state.time + (Date.now() - state.updatedAt) / 1000
             : state.time;
           playing = state.playing;
+          speed = state.speed || 1;
+          if (state.url) { roomUrl = state.url; roomTitle = state.title || ''; }
+        } else {
+          // First person to join — seed the room state with their URL
+          roomStates.set(roomId, { time: 0, playing: false, speed: 1, url: joinUrl, title: joinTitle, updatedAt: Date.now() });
         }
 
         ws.send(JSON.stringify({
@@ -74,6 +94,9 @@ wss.on('connection', (ws) => {
           users: getRoomUsers(roomId),
           currentTime,
           playing,
+          speed,
+          url: roomUrl,
+          title: roomTitle,
         }));
 
         // Notify others
@@ -87,44 +110,61 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'navigate': {
+        if (!currentRoom) return;
+        const navUrl = String(data.url || '').slice(0, 2048);
+        const navTitle = String(data.title || '').slice(0, 256);
+        if (!navUrl) return;
+        const prevStateNav = roomStates.get(currentRoom) || {};
+        roomStates.set(currentRoom, { ...prevStateNav, url: navUrl, title: navTitle, time: 0, playing: false });
+        broadcastToRoom(currentRoom, { type: 'navigate', url: navUrl, title: navTitle, username }, ws);
+        break;
+      }
+
       case 'play': {
         if (!currentRoom) return;
         const time = Number(data.time) || 0;
-        roomStates.set(currentRoom, { time, playing: true, updatedAt: Date.now() });
-        broadcastToRoom(currentRoom, {
-          type: 'play',
-          time,
-          username,
-        }, ws);
+        const prevStatePl = roomStates.get(currentRoom) || {};
+        roomStates.set(currentRoom, { time, playing: true, speed: prevStatePl.speed || 1, updatedAt: Date.now() });
+        broadcastToRoom(currentRoom, { type: 'play', time, username }, ws);
         break;
       }
 
       case 'pause': {
         if (!currentRoom) return;
         const time = Number(data.time) || 0;
-        roomStates.set(currentRoom, { time, playing: false, updatedAt: Date.now() });
-        broadcastToRoom(currentRoom, {
-          type: 'pause',
-          time,
-          username,
-        }, ws);
+        const prevStatePa = roomStates.get(currentRoom) || {};
+        roomStates.set(currentRoom, { time, playing: false, speed: prevStatePa.speed || 1, updatedAt: Date.now() });
+        broadcastToRoom(currentRoom, { type: 'pause', time, username }, ws);
         break;
       }
 
       case 'seek': {
         if (!currentRoom) return;
         const time = Number(data.time) || 0;
-        const prevState = roomStates.get(currentRoom);
+        const prevStateSk = roomStates.get(currentRoom);
         roomStates.set(currentRoom, {
           time,
-          playing: prevState ? prevState.playing : false,
+          playing: prevStateSk ? prevStateSk.playing : false,
+          speed: prevStateSk ? prevStateSk.speed || 1 : 1,
           updatedAt: Date.now(),
         });
-        broadcastToRoom(currentRoom, {
-          type: 'seek',
-          time,
-          username,
-        }, ws);
+        broadcastToRoom(currentRoom, { type: 'seek', time, username }, ws);
+        break;
+      }
+
+      case 'speed': {
+        if (!currentRoom) return;
+        const speed = Number(data.speed);
+        if (!speed || speed <= 0 || speed > 16) return;
+        const prevStateSp = roomStates.get(currentRoom) || {};
+        roomStates.set(currentRoom, {
+          time: prevStateSp.time || 0,
+          playing: prevStateSp.playing || false,
+          speed,
+          updatedAt: Date.now(),
+        });
+        broadcastToRoom(currentRoom, { type: 'speed', speed, username }, ws);
         break;
       }
 
@@ -132,11 +172,12 @@ wss.on('connection', (ws) => {
         if (!currentRoom) return;
         const message = String(data.message || '').trim().slice(0, 500);
         if (!message) return;
+        // Exclude sender — they already added the message to their local log
         broadcastToRoom(currentRoom, {
           type: 'chat',
           message,
           username,
-        }, null); // send to everyone including sender
+        }, ws);
         break;
       }
 
@@ -148,6 +189,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    clearInterval(rateLimitReset);
     if (currentRoom) leaveRoom(ws, currentRoom);
   });
 
