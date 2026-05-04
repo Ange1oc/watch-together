@@ -1,12 +1,8 @@
-/* ============================================================
-   Video Sync — Popup  v1.2
-   ============================================================ */
 'use strict';
 
 const DEFAULT_SERVER = 'wss://your-server.railway.app';
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
-// ─── DOM refs ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
 const dot = $('dot');
@@ -40,7 +36,6 @@ let myUsername = null;
 let activeTab = 'tab-room';
 let unreadChat = 0;
 
-// ─── Build speed buttons ──────────────────────────────────────────────────────
 SPEEDS.forEach(s => {
     const b = document.createElement('button');
     b.className = 'spd-btn' + (s === 1 ? ' active' : '');
@@ -53,7 +48,6 @@ SPEEDS.forEach(s => {
     speedWrap.appendChild(b);
 });
 
-// ─── Tab switching ────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const id = btn.dataset.tab;
@@ -70,7 +64,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
 chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (!tab) return;
     const isWeb = tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'));
@@ -80,7 +73,6 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     }
     panelMain.style.display = 'block';
 
-    // Load saved prefs
     chrome.storage.local.get(['serverUrl', 'username', 'lastRoom'], data => {
         const url = data.serverUrl || DEFAULT_SERVER;
         srvUrlInput.value = url;
@@ -89,10 +81,8 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
         if (data.lastRoom) roomInput.value = data.lastRoom;
     });
 
-    // Query content script status (inject if needed)
     chrome.tabs.sendMessage(tab.id, { type: 'GET_STATUS' }, res => {
         if (chrome.runtime.lastError || !res) {
-            // Content script not injected yet — inject now
             chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] })
                 .then(() => chrome.tabs.sendMessage(tab.id, { type: 'GET_STATUS' }, res2 => {
                     if (!chrome.runtime.lastError && res2) applyFullStatus(res2, tab.id);
@@ -110,6 +100,7 @@ function applyFullStatus(res, tabId) {
         srvUrlInput.value = res.serverUrl;
         srvUrlDisplay.textContent = trimUrl(res.serverUrl);
     }
+    if (res.username) myUsername = res.username;
     if (res.speed) setSpeedActive(res.speed);
     noVideoWarn.style.display = res.hasVideo ? 'none' : 'flex';
 
@@ -121,11 +112,11 @@ function applyFullStatus(res, tabId) {
     });
 }
 
-// ─── Real-time updates ────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(msg => {
     switch (msg.type) {
         case 'STATUS_UPDATE':
             applyState(msg.state, msg.room);
+            if (msg.username) myUsername = msg.username;
             if (msg.speed != null) setSpeedActive(msg.speed);
             if (msg.hasVideo != null) noVideoWarn.style.display = msg.hasVideo ? 'none' : 'flex';
             break;
@@ -146,7 +137,6 @@ chrome.runtime.onMessage.addListener(msg => {
     }
 });
 
-// ─── Server settings ──────────────────────────────────────────────────────────
 btnToggleSrv.addEventListener('click', () => {
     const open = srvEdit.classList.toggle('open');
     btnToggleSrv.textContent = open ? '✕ Закрыть' : '✏️ Изменить';
@@ -155,7 +145,6 @@ btnToggleSrv.addEventListener('click', () => {
 btnSaveSrv.addEventListener('click', () => {
     let url = srvUrlInput.value.trim();
     if (!url) return;
-    // Normalise https→wss, http→ws
     url = url.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
     if (!/^wss?:\/\/.+/.test(url)) {
         srvUrlErr.classList.add('show');
@@ -169,7 +158,6 @@ btnSaveSrv.addEventListener('click', () => {
     btnToggleSrv.textContent = '✏️ Изменить';
 });
 
-// ─── Connect / Create ─────────────────────────────────────────────────────────
 btnJoin.addEventListener('click', () => {
     const room = roomInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!room) {
@@ -186,13 +174,11 @@ btnCreate.addEventListener('click', () => {
     doConnect(room);
 });
 
-// ─── Disconnect ───────────────────────────────────────────────────────────────
 btnDisconnect.addEventListener('click', () => {
     sendToContent({ type: 'DISCONNECT' });
     applyState('disconnected', null);
 });
 
-// ─── Copy room ID ─────────────────────────────────────────────────────────────
 btnCopy.addEventListener('click', () => {
     const id = roomCode.textContent;
     if (!id || id === '—') return;
@@ -202,7 +188,6 @@ btnCopy.addEventListener('click', () => {
     }).catch(() => { });
 });
 
-// ─── Chat ─────────────────────────────────────────────────────────────────────
 btnSendChat.addEventListener('click', sendChat);
 chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
 
@@ -214,7 +199,6 @@ function sendChat() {
     chatInput.focus();
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function doConnect(room) {
     let url = srvUrlInput.value.trim() || DEFAULT_SERVER;
     url = url.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
@@ -238,7 +222,6 @@ function applyState(state, room) {
     } else {
         panelDisconn.style.display = 'block';
         panelConn.style.display = 'none';
-        // Reset tabs
         activeTab = 'tab-room';
         document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
         document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === 0));

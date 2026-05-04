@@ -29,7 +29,6 @@
       user-select: none;
     }
 
-    /* ── Header ──────────────────────────────────────────────────────────────── */
     .header {
       background: var(--s1);
       padding: 10px 14px;
@@ -58,7 +57,6 @@
     .pill-text.connected  { color: var(--green); }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-    /* ── Server section ──────────────────────────────────────────────────────── */
     .srv {
       padding: 9px 14px;
       border-bottom: 1px solid var(--border);
@@ -79,7 +77,6 @@
     .field-err { font-size: 10px; color: var(--accent); margin-top: 4px; display: none; }
     .field-err.show { display: block; }
 
-    /* ── Inputs ──────────────────────────────────────────────────────────────── */
     input[type="text"] {
       width: 100%; padding: 8px 10px;
       background: var(--s2); border: 1px solid rgba(255,255,255,.1);
@@ -91,7 +88,6 @@
     input.err { border-color: var(--accent) !important; animation: shake .3s; }
     @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
 
-    /* ── Buttons ─────────────────────────────────────────────────────────────── */
     .btn {
       padding: 8px 14px; border: none; border-radius: var(--r);
       cursor: pointer; font-size: 12px; font-weight: 600;
@@ -112,7 +108,6 @@
     }
     .icon-btn:hover { background: var(--s2); }
 
-    /* ── Section wrapper ─────────────────────────────────────────────────────── */
     .sect { padding: 12px 14px; border-bottom: 1px solid var(--border); }
     .sect:last-child { border-bottom: none; }
     .sect-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin-bottom: 7px; }
@@ -122,14 +117,12 @@
     .btn-row { display: flex; gap: 6px; margin-top: 10px; }
     .btn-row .btn { flex: 1; }
 
-    /* ── No site banner ──────────────────────────────────────────────────────── */
     .no-site {
       padding: 24px 14px; text-align: center;
       color: var(--muted); font-size: 12px; line-height: 1.8;
     }
     .no-site .icon { font-size: 30px; margin-bottom: 8px; }
 
-    /* ── No video warning ────────────────────────────────────────────────────── */
     .no-video {
       display: flex; align-items: center; gap: 7px;
       padding: 7px 10px; margin-bottom: 10px;
@@ -137,7 +130,6 @@
       border-radius: var(--r); font-size: 11px; color: var(--orange);
     }
 
-    /* ── Tabs ────────────────────────────────────────────────────────────────── */
     .tabs {
       display: flex; background: var(--s1);
       border-bottom: 1px solid var(--border);
@@ -157,7 +149,6 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* ── Room display ────────────────────────────────────────────────────────── */
     .room-box {
       display: flex; align-items: center; gap: 8px;
       padding: 9px 12px; background: var(--s2);
@@ -169,7 +160,6 @@
     }
     .room-hint { font-size: 10px; color: var(--muted); margin-top: 3px; }
 
-    /* ── Users ───────────────────────────────────────────────────────────────── */
     .users-wrap { display: flex; flex-wrap: wrap; gap: 5px; min-height: 20px; }
     .user-chip {
       display: flex; align-items: center; gap: 4px;
@@ -179,7 +169,6 @@
     .user-chip.me { color: var(--text); border-color: rgba(233,69,96,.35); }
     .user-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 
-    /* ── Speed buttons ───────────────────────────────────────────────────────── */
     .speed-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
     .spd-btn {
       flex: 1; min-width: 34px; padding: 5px 3px; text-align: center;
@@ -190,7 +179,6 @@
     .spd-btn:hover { color: var(--text); border-color: rgba(255,255,255,.18); }
     .spd-btn.active { background: rgba(233,69,96,.14); border-color: var(--accent); color: var(--accent); }
 
-    /* ── Chat ────────────────────────────────────────────────────────────────── */
     .chat-log {
       height: 145px; overflow-y: auto;
       display: flex; flex-direction: column; gap: 5px;
@@ -214,7 +202,6 @@
     .chat-input-row { display: flex; gap: 6px; margin-top: 8px; }
     .chat-input-row input { flex: 1; }
 
-    /* ── Navigate info row ────────────────────────────────────────────────────── */
     .nav-info-row { display: flex; align-items: center; gap: 8px; }
     .nav-title {
       flex: 1; font-size: 11px; color: var(--muted);
@@ -228,17 +215,14 @@
     }
     .nav-goto:hover { background: var(--s3); }
 
-    /* ── Divider ─────────────────────────────────────────────────────────────── */
     .div { height: 1px; background: var(--border); margin: 10px 0; }
 
-    /* ── Fade in panel ───────────────────────────────────────────────────────── */
     #panel-disconnected, #panel-connected { animation: fadeUp .15s ease; }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; } }
   </style>
 </head>
 <body>
 
-<!-- Header -->
 <div class="header">
   <span class="logo">🎬</span>
   <span class="title">Video Sync</span>
@@ -248,7 +232,6 @@
   </div>
 </div>
 
-<!-- Not on a web page -->
 <div id="panel-no-site" style="display:none">
   <div class="no-site">
     <div class="icon">🌐</div>
@@ -257,10 +240,8 @@
   </div>
 </div>
 
-<!-- Main UI -->
 <div id="panel-main" style="display:none">
 
-  <!-- Server row -->
   <div class="srv">
     <div class="srv-row">
       <div>
@@ -276,7 +257,6 @@
     <div class="field-err" id="srv-url-err">Введите URL вида wss://… или https://…</div>
   </div>
 
-  <!-- DISCONNECTED panel -->
   <div id="panel-disconnected">
     <div class="sect">
       <div id="no-video-warn" class="no-video" style="display:none">
@@ -297,7 +277,6 @@
     </div>
   </div>
 
-  <!-- CONNECTED panel -->
   <div id="panel-connected" style="display:none">
     <div class="tabs">
       <button class="tab-btn active" data-tab="tab-room">Комната</button>
@@ -306,7 +285,6 @@
       </button>
     </div>
 
-    <!-- Tab: Room -->
     <div id="tab-room" class="tab-panel active">
       <div class="sect">
         <div class="sect-title">Комната</div>
@@ -341,7 +319,6 @@
       </div>
     </div>
 
-    <!-- Tab: Chat -->
     <div id="tab-chat" class="tab-panel">
       <div class="sect">
         <div class="chat-log" id="chat-log">
@@ -353,9 +330,9 @@
         </div>
       </div>
     </div>
-  </div><!-- /panel-connected -->
+  </div>
 
-</div><!-- /panel-main -->
+</div>
 
 <script src="popup.js"></script>
 </body>

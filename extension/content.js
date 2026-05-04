@@ -1,14 +1,77 @@
-/* ============================================================
-   Video Sync — Content Script  v1.2
-   Works on any site with a <video> element
-   ============================================================ */
 (function () {
     'use strict';
 
     if (window._vsync) return;
     window._vsync = true;
 
-    // ─── State ───────────────────────────────────────────────────────────────────
+    if (window !== window.top) {
+        let ifSyncing = false;
+        let ifSyncTimer = null;
+
+        function ifApplySync(fn) {
+            ifSyncing = true;
+            try { fn(); } catch { }
+            if (ifSyncTimer) clearTimeout(ifSyncTimer);
+            ifSyncTimer = setTimeout(() => { ifSyncing = false; }, 1000);
+        }
+
+        function getBestIframeVideo() {
+            return [...document.querySelectorAll('video')]
+                .filter(v => v.readyState > 0 || v.src || v.currentSrc)
+                .sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight))[0] || null;
+        }
+
+        function setupIframeVideo(v) {
+            if (v._vsync_if) return;
+            v._vsync_if = true;
+
+            v.addEventListener('play', () => {
+                if (ifSyncing) return;
+                window.parent.postMessage({ _vsync: true, type: 'play', time: v.currentTime }, '*');
+            });
+            v.addEventListener('pause', () => {
+                if (ifSyncing) return;
+                window.parent.postMessage({ _vsync: true, type: 'pause', time: v.currentTime }, '*');
+            });
+            let sdt = null;
+            v.addEventListener('seeked', () => {
+                if (ifSyncing) return;
+                if (sdt) clearTimeout(sdt);
+                sdt = setTimeout(() => {
+                    if (!ifSyncing)
+                        window.parent.postMessage({ _vsync: true, type: 'seek', time: v.currentTime }, '*');
+                }, 150);
+            });
+            v.addEventListener('ratechange', () => {
+                if (ifSyncing) return;
+                window.parent.postMessage({ _vsync: true, type: 'speed', speed: v.playbackRate }, '*');
+            });
+        }
+
+        window.addEventListener('message', e => {
+            if (!e.data || e.data._vsync_src !== 'main') return;
+            const d = e.data;
+            const v = getBestIframeVideo();
+            if (!v) return;
+            ifApplySync(() => {
+                if (d.type === 'play') { if (typeof d.time === 'number') v.currentTime = d.time; v.play().catch(() => { }); }
+                else if (d.type === 'pause') { if (typeof d.time === 'number') v.currentTime = d.time; v.pause(); }
+                else if (d.type === 'seek') { if (typeof d.time === 'number') v.currentTime = d.time; }
+                else if (d.type === 'speed') { if (typeof d.speed === 'number' && d.speed > 0) v.playbackRate = d.speed; }
+            });
+        });
+
+        function scanIframeVideos() { document.querySelectorAll('video').forEach(setupIframeVideo); }
+        scanIframeVideos();
+        new MutationObserver(scanIframeVideos).observe(document.documentElement, { childList: true, subtree: true });
+
+        setInterval(() => {
+            window.parent.postMessage({ _vsync: true, type: '_ifping', hasVideo: !!getBestIframeVideo() }, '*');
+        }, 2000);
+
+        return;
+    }
+
     let ws = null;
     let wsState = 'disconnected';
     let currentRoom = null;
@@ -24,10 +87,10 @@
     let notifyDebounceTimer = null;
     let navDebounceTimer = null;
     let lastBroadcastUrl = '';
+    let iframeHasVideo = false;
     const chatLog = [];
     const MAX_CHAT = 100;
 
-    // ─── Widget (page overlay) ────────────────────────────────────────────────────
     const widget = buildWidget();
     function attachWidget() {
         if (document.body && !document.body.contains(widget))
@@ -36,7 +99,6 @@
     attachWidget();
     new MutationObserver(attachWidget).observe(document.documentElement, { childList: true });
 
-    // ─── Messages from popup ──────────────────────────────────────────────────────
     chrome.runtime.onMessage.addListener((msg, _s, respond) => {
         switch (msg.type) {
             case 'CONNECT':
@@ -55,7 +117,7 @@
 
             case 'GET_STATUS': {
                 const v = getVideo();
-                respond({ state: wsState, room: currentRoom, serverUrl, speed: v ? v.playbackRate : 1, hasVideo: !!v });
+                respond({ state: wsState, room: currentRoom, serverUrl, username: myUsername, speed: v ? v.playbackRate : 1, hasVideo: !!v || iframeHasVideo });
                 break;
             }
 
@@ -84,8 +146,9 @@
             case 'SET_SPEED': {
                 const v = getVideo();
                 const spd = Number(msg.speed);
-                if (v && spd > 0 && spd <= 16) {
-                    applySync(() => { v.playbackRate = spd; });
+                if (spd > 0 && spd <= 16) {
+                    if (v) applySync(() => { v.playbackRate = spd; });
+                    relayToIframes({ type: 'speed', speed: spd });
                     if (ws && ws.readyState === WebSocket.OPEN)
                         ws.send(JSON.stringify({ type: 'speed', speed: spd }));
                 }
@@ -96,7 +159,6 @@
         return true;
     });
 
-    // ─── WebSocket ────────────────────────────────────────────────────────────────
     function connect() {
         if (ws) { ws.onclose = null; ws.close(); ws = null; }
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -137,7 +199,7 @@
             if (currentRoom && serverUrl) scheduleReconnect();
         };
 
-        ws.onerror = () => { }; // onclose handles cleanup
+        ws.onerror = () => { };
     }
 
     function permanentDisconnect() {
@@ -156,7 +218,6 @@
         }, reconnectDelay);
     }
 
-    // ─── Server messages ──────────────────────────────────────────────────────────
     function handleMessage(data) {
         switch (data.type) {
 
@@ -164,20 +225,23 @@
                 userList = data.users || [];
                 notifyPopup(); updateWidget();
                 const v = getVideo();
-                if (v && typeof data.currentTime === 'number' && data.currentTime > 2) {
-                    applySync(() => {
-                        v.currentTime = data.currentTime;
-                        if (typeof data.speed === 'number' && data.speed > 0)
-                            v.playbackRate = data.speed;
-                        if (data.playing) v.play().catch(() => { });
-                        else v.pause();
-                    });
+                if (typeof data.currentTime === 'number' && data.currentTime > 2) {
+                    if (v) {
+                        applySync(() => {
+                            v.currentTime = data.currentTime;
+                            if (typeof data.speed === 'number' && data.speed > 0)
+                                v.playbackRate = data.speed;
+                            if (data.playing) v.play().catch(() => { });
+                            else v.pause();
+                        });
+                    }
+                    relayToIframes({ type: data.playing ? 'play' : 'pause', time: data.currentTime });
+                    if (typeof data.speed === 'number' && data.speed > 0)
+                        relayToIframes({ type: 'speed', speed: data.speed });
                 }
-                // If room has a known URL different from ours, suggest it
                 if (data.url && data.url !== location.href) {
                     showNavSuggestion('\u043a\u043e\u043c\u043d\u0430\u0442\u0430', data.url, data.title || data.url);
                 }
-                // Always push room URL to popup nav info (even if same)
                 chrome.runtime.sendMessage({
                     type: 'NAVIGATE_UPDATE',
                     url: data.url || '',
@@ -203,6 +267,7 @@
             case 'play': {
                 const v = getVideo();
                 if (v) applySync(() => { v.currentTime = data.time; v.play().catch(() => { }); });
+                relayToIframes({ type: 'play', time: data.time });
                 toast('\u25B6 ' + data.username + ' \u0432\u043E\u0441\u043F\u0440\u043E\u0438\u0437\u0432\u0435\u0434\u0435\u043D\u0438\u0435');
                 break;
             }
@@ -210,6 +275,7 @@
             case 'pause': {
                 const v = getVideo();
                 if (v) applySync(() => { v.currentTime = data.time; v.pause(); });
+                relayToIframes({ type: 'pause', time: data.time });
                 toast('\u23F8 ' + data.username + ' \u043F\u0430\u0443\u0437\u0430');
                 break;
             }
@@ -217,6 +283,7 @@
             case 'seek': {
                 const v = getVideo();
                 if (v) applySync(() => { v.currentTime = data.time; });
+                relayToIframes({ type: 'seek', time: data.time });
                 toast('\u23E9 ' + data.username + ' \u043F\u0435\u0440\u0435\u043C\u043E\u0442\u0430\u043B');
                 break;
             }
@@ -225,6 +292,7 @@
                 const v = getVideo();
                 const spd = Number(data.speed);
                 if (v && spd > 0) applySync(() => { v.playbackRate = spd; });
+                relayToIframes({ type: 'speed', speed: spd });
                 notifyPopup(); updateWidget();
                 toast('\u26A1 ' + data.username + ' \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C: ' + spd + '\xD7');
                 break;
@@ -257,7 +325,6 @@
         chrome.runtime.sendMessage({ type: 'CHAT_UPDATE', log: chatLog }).catch(() => { });
     }
 
-    // ─── Video detection ──────────────────────────────────────────────────────────
     function getVideo() {
         const all = [...document.querySelectorAll('video')];
         if (!all.length) return null;
@@ -286,7 +353,6 @@
             ws.send(JSON.stringify({ type: 'pause', time: v.currentTime }));
         });
 
-        // Debounced to prevent event storms during buffering
         v.addEventListener('seeked', () => {
             if (isSyncing || !ws || ws.readyState !== WebSocket.OPEN) return;
             if (seekDebounceTimer) clearTimeout(seekDebounceTimer);
@@ -309,7 +375,6 @@
     findAndSetup();
     new MutationObserver(findAndSetup).observe(document.documentElement, { childList: true, subtree: true });
 
-    // ─── Navigation detection ─────────────────────────────────────────────────────
     function broadcastNavigate() {
         const url = location.href;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -338,7 +403,34 @@
     window.addEventListener('popstate', scheduleNavBroadcast);
     window.addEventListener('hashchange', scheduleNavBroadcast);
 
-    // ─── Sync helper ──────────────────────────────────────────────────────────────
+    function relayToIframes(cmd) {
+        document.querySelectorAll('iframe').forEach(iframe => {
+            try { iframe.contentWindow.postMessage({ _vsync_src: 'main', ...cmd }, '*'); } catch { }
+        });
+    }
+
+    window.addEventListener('message', e => {
+        if (!e.data || !e.data._vsync || e.source === window) return;
+        const d = e.data;
+
+        if (d.type === '_ifping') {
+            iframeHasVideo = !!d.hasVideo;
+            return;
+        }
+
+        if (!ws || ws.readyState !== WebSocket.OPEN || isSyncing) return;
+        if (d.type === 'play')
+            ws.send(JSON.stringify({ type: 'play', time: d.time }));
+        else if (d.type === 'pause')
+            ws.send(JSON.stringify({ type: 'pause', time: d.time }));
+        else if (d.type === 'seek')
+            ws.send(JSON.stringify({ type: 'seek', time: d.time }));
+        else if (d.type === 'speed') {
+            ws.send(JSON.stringify({ type: 'speed', speed: d.speed }));
+            notifyPopup(); updateWidget();
+        }
+    });
+
     function applySync(fn) {
         if (syncTimer) clearTimeout(syncTimer);
         isSyncing = true;
@@ -346,20 +438,18 @@
         syncTimer = setTimeout(() => { isSyncing = false; }, 1000);
     }
 
-    // ─── Popup comms (debounced 50ms to batch state changes) ─────────────────────
     function notifyPopup() {
         if (notifyDebounceTimer) clearTimeout(notifyDebounceTimer);
         notifyDebounceTimer = setTimeout(() => {
             const v = getVideo();
             chrome.runtime.sendMessage({
                 type: 'STATUS_UPDATE', state: wsState, room: currentRoom,
-                serverUrl, speed: v ? v.playbackRate : 1, hasVideo: !!v,
+                serverUrl, username: myUsername, speed: v ? v.playbackRate : 1, hasVideo: !!v || iframeHasVideo,
             }).catch(() => { });
             chrome.runtime.sendMessage({ type: 'USERS_UPDATE', users: userList }).catch(() => { });
         }, 50);
     }
 
-    // ─── Widget ───────────────────────────────────────────────────────────────────
     function buildWidget() {
         const el = document.createElement('div');
         el.id = 'vsync-widget';
@@ -402,7 +492,6 @@
         (document.head || document.documentElement).appendChild(s);
     }
 
-    // ─── Toast queue ──────────────────────────────────────────────────────────────
     const toastQ = [];
     let toastBusy = false;
 
@@ -450,7 +539,6 @@
         return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
-    // ─── Navigation suggestion banner ─────────────────────────────────────────────
     function showNavSuggestion(fromUser, url, title) {
         const old = document.getElementById('vsync-nav-banner');
         if (old) old.remove();
