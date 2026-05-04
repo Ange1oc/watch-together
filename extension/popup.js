@@ -18,7 +18,7 @@ const LANG = {
         members: 'Participants', currentEp: 'Current episode',
         open: 'Open', speed: 'Playback speed', disconnect: 'Disconnect',
         chatEmpty: 'No messages yet', chatPh: 'Write a message…',
-        you: 'you',
+        you: 'you', copyId: 'Copy room ID',
     },
     ru: {
         offline: 'Офлайн', connecting: 'Подключение…', online: 'Онлайн',
@@ -34,7 +34,7 @@ const LANG = {
         members: 'Участники', currentEp: 'Текущая серия',
         open: 'Открыть', speed: 'Скорость воспроизведения', disconnect: 'Отключиться',
         chatEmpty: 'Чат пока пуст', chatPh: 'Написать…',
-        you: 'вы',
+        you: 'вы', copyId: 'Скопировать ID',
     }
 };
 
@@ -50,6 +50,10 @@ function applyLang(lang) {
     document.querySelectorAll('[data-i18n-ph]').forEach(el => {
         const key = el.dataset.i18nPh;
         if (t[key] !== undefined) el.placeholder = t[key];
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle;
+        if (t[key] !== undefined) el.title = t[key];
     });
     const langBtn = $('btn-lang');
     if (langBtn) langBtn.textContent = lang === 'ru' ? 'EN' : 'RU';
