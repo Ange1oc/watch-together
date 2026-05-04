@@ -1,7 +1,8 @@
 {
-  "name": "rezka-sync-server",
-  "version": "1.0.0",
-  "description": "WebSocket sync server for Rezka browser extension",
+  "name": "watch-together",
+  "version": "1.2.0",
+  "description": "WebSocket sync server for Watch Together browser extension",
+  "license": "MIT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

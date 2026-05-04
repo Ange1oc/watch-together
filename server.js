@@ -227,5 +227,5 @@ function broadcastToRoom(roomId, message, excludeWs) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Rezka Sync server running on port ${PORT}`);
+  console.log(`Watch Together server running on port ${PORT}`);
 });

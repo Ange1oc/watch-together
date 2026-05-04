@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Video Sync</title>
+  <title>Watch Together</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -39,6 +39,14 @@
     }
     .logo { font-size: 17px; line-height: 1; }
     .title { font-size: 14px; font-weight: 700; color: var(--accent); flex: 1; letter-spacing: .2px; }
+
+    .lang-btn {
+      background: var(--s2); border: 1px solid var(--border);
+      color: var(--muted); font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 6px; cursor: pointer;
+      letter-spacing: .5px; transition: color .15s, border-color .15s;
+    }
+    .lang-btn:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
 
     .status-pill {
       display: flex; align-items: center; gap: 5px;
@@ -225,18 +233,18 @@
 
 <div class="header">
   <span class="logo">🎬</span>
-  <span class="title">Video Sync</span>
+  <span class="title">Watch Together</span>
+  <button class="lang-btn" id="btn-lang">EN</button>
   <div class="status-pill">
     <div class="dot" id="dot"></div>
-    <span class="pill-text" id="pill-text">Офлайн</span>
+    <span class="pill-text" id="pill-text" data-i18n="offline">Офлайн</span>
   </div>
 </div>
 
 <div id="panel-no-site" style="display:none">
   <div class="no-site">
     <div class="icon">🌐</div>
-    Откройте любую страницу с видео<br>
-    для начала совместного просмотра
+    <span data-i18n="noSite">Откройте любую страницу с видео<br>для начала совместного просмотра</span>
   </div>
 </div>
 
@@ -245,16 +253,16 @@
   <div class="srv">
     <div class="srv-row">
       <div>
-        <div class="srv-label">Сервер</div>
+        <div class="srv-label" data-i18n="server">Сервер</div>
         <div class="srv-url" id="srv-url-display">—</div>
       </div>
-      <button class="srv-edit-btn" id="btn-toggle-srv">✏️ Изменить</button>
+      <button class="srv-edit-btn" id="btn-toggle-srv" data-i18n="edit">✏️ Изменить</button>
     </div>
     <div class="srv-edit" id="srv-edit">
       <input type="text" id="srv-url-input" placeholder="wss://your-server.railway.app" style="flex:1" />
       <button class="btn btn-primary" id="btn-save-srv" style="padding:8px 12px">OK</button>
     </div>
-    <div class="field-err" id="srv-url-err">Введите URL вида wss://… или https://…</div>
+    <div class="field-err" id="srv-url-err" data-i18n="srvErr">Введите URL вида wss://… или https://…</div>
   </div>
 
   <div id="panel-disconnected">
@@ -287,45 +295,45 @@
 
     <div id="tab-room" class="tab-panel active">
       <div class="sect">
-        <div class="sect-title">Комната</div>
+        <div class="sect-title" data-i18n="room">Комната</div>
         <div class="room-box">
           <span class="room-code" id="room-code">—</span>
           <button class="icon-btn" id="btn-copy" title="Скопировать ID">📋</button>
         </div>
-        <div class="room-hint">Поделитесь ID с другом</div>
+        <div class="room-hint" data-i18n="roomHint">Поделитесь ID с другом</div>
       </div>
 
       <div class="sect">
-        <div class="sect-title">Участники</div>
+        <div class="sect-title" data-i18n="members">Участники</div>
         <div class="users-wrap" id="users-wrap"></div>
       </div>
 
       <div class="sect" id="nav-sect" style="display:none">
-        <div class="sect-title">Текущая серия</div>
+        <div class="sect-title" data-i18n="currentEp">Текущая серия</div>
         <div class="nav-info-row">
           <span class="nav-title" id="nav-title"></span>
-          <a class="nav-goto" id="nav-goto" href="#" target="_blank">Открыть</a>
+          <a class="nav-goto" id="nav-goto" href="#" target="_blank" data-i18n="open">Открыть</a>
         </div>
       </div>
 
       <div class="sect">
-        <div class="sect-title">Скорость воспроизведения</div>
+        <div class="sect-title" data-i18n="speed">Скорость воспроизведения</div>
         <div class="speed-wrap" id="speed-wrap"></div>
       </div>
 
       <div class="sect">
         <div class="div" style="margin:0 0 10px"></div>
-        <button class="btn btn-danger btn-full" id="btn-disconnect">Отключиться</button>
+        <button class="btn btn-danger btn-full" id="btn-disconnect" data-i18n="disconnect">Отключиться</button>
       </div>
     </div>
 
     <div id="tab-chat" class="tab-panel">
       <div class="sect">
         <div class="chat-log" id="chat-log">
-          <div class="chat-empty">Чат пока пуст</div>
+          <div class="chat-empty" data-i18n="chatEmpty">Чат пока пуст</div>
         </div>
         <div class="chat-input-row">
-          <input type="text" id="chat-input" placeholder="Написать…" maxlength="300" />
+          <input type="text" id="chat-input" data-i18n-ph="chatPh" placeholder="Написать…" maxlength="300" />
           <button class="btn btn-primary" id="btn-send-chat" style="padding:8px 12px">↵</button>
         </div>
       </div>

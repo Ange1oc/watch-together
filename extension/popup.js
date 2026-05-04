@@ -3,6 +3,61 @@
 const DEFAULT_SERVER = 'wss://your-server.railway.app';
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
+const LANG = {
+    en: {
+        offline: 'Offline', connecting: 'Connecting…', online: 'Online',
+        server: 'Server', edit: '✏️ Edit', close: '✕ Close',
+        srvErr: 'Enter a URL like wss://… or https://…',
+        noSite: 'Open any page with video\nto start watching together',
+        noVideo: 'No video found on this page',
+        nickname: 'Your nickname', roomId: 'Room ID',
+        roomPh: 'Paste ID or create new',
+        join: 'Join', create: 'Create',
+        tabRoom: 'Room', tabChat: 'Chat',
+        room: 'Room', roomHint: 'Share this ID with a friend',
+        members: 'Participants', currentEp: 'Current episode',
+        open: 'Open', speed: 'Playback speed', disconnect: 'Disconnect',
+        chatEmpty: 'No messages yet', chatPh: 'Write a message…',
+        you: 'you',
+    },
+    ru: {
+        offline: 'Офлайн', connecting: 'Подключение…', online: 'Онлайн',
+        server: 'Сервер', edit: '✏️ Изменить', close: '✕ Закрыть',
+        srvErr: 'Введите URL вида wss://… или https://…',
+        noSite: 'Откройте любую страницу с видео\nдля начала совместного просмотра',
+        noVideo: 'Видео на странице не обнаружено',
+        nickname: 'Ваш никнейм', roomId: 'ID комнаты',
+        roomPh: 'Вставьте ID или создайте новую',
+        join: 'Войти', create: 'Создать',
+        tabRoom: 'Комната', tabChat: 'Чат',
+        room: 'Комната', roomHint: 'Поделитесь ID с другом',
+        members: 'Участники', currentEp: 'Текущая серия',
+        open: 'Открыть', speed: 'Скорость воспроизведения', disconnect: 'Отключиться',
+        chatEmpty: 'Чат пока пуст', chatPh: 'Написать…',
+        you: 'вы',
+    }
+};
+
+let currentLang = 'ru';
+
+function applyLang(lang) {
+    currentLang = lang;
+    const t = LANG[lang];
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (t[key] !== undefined) el.textContent = t[key];
+    });
+    document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+        const key = el.dataset.i18nPh;
+        if (t[key] !== undefined) el.placeholder = t[key];
+    });
+    const langBtn = $('btn-lang');
+    if (langBtn) langBtn.textContent = lang === 'ru' ? 'EN' : 'RU';
+    const isSrvOpen = srvEdit && srvEdit.classList.contains('open');
+    if (btnToggleSrv) btnToggleSrv.textContent = isSrvOpen ? t.close : t.edit;
+    chrome.storage.local.set({ lang });
+}
+
 const $ = id => document.getElementById(id);
 
 const dot = $('dot');
@@ -64,6 +119,13 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
+const btnLang = $('btn-lang');
+if (btnLang) {
+    btnLang.addEventListener('click', () => {
+        applyLang(currentLang === 'ru' ? 'en' : 'ru');
+    });
+}
+
 chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (!tab) return;
     const isWeb = tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'));
@@ -73,12 +135,13 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     }
     panelMain.style.display = 'block';
 
-    chrome.storage.local.get(['serverUrl', 'username', 'lastRoom'], data => {
+    chrome.storage.local.get(['serverUrl', 'username', 'lastRoom', 'lang'], data => {
         const url = data.serverUrl || DEFAULT_SERVER;
         srvUrlInput.value = url;
         srvUrlDisplay.textContent = trimUrl(url);
         if (data.username) { usernameInput.value = data.username; myUsername = data.username; }
         if (data.lastRoom) roomInput.value = data.lastRoom;
+        if (data.lang && LANG[data.lang]) applyLang(data.lang);
     });
 
     chrome.tabs.sendMessage(tab.id, { type: 'GET_STATUS' }, res => {
@@ -139,7 +202,7 @@ chrome.runtime.onMessage.addListener(msg => {
 
 btnToggleSrv.addEventListener('click', () => {
     const open = srvEdit.classList.toggle('open');
-    btnToggleSrv.textContent = open ? '✕ Закрыть' : '✏️ Изменить';
+    btnToggleSrv.textContent = open ? LANG[currentLang].close : LANG[currentLang].edit;
 });
 
 btnSaveSrv.addEventListener('click', () => {
@@ -155,7 +218,7 @@ btnSaveSrv.addEventListener('click', () => {
     srvUrlDisplay.textContent = trimUrl(url);
     chrome.storage.local.set({ serverUrl: url });
     srvEdit.classList.remove('open');
-    btnToggleSrv.textContent = '✏️ Изменить';
+    btnToggleSrv.textContent = LANG[currentLang].edit;
 });
 
 btnJoin.addEventListener('click', () => {
@@ -212,7 +275,7 @@ function doConnect(room) {
 function applyState(state, room) {
     dot.className = 'dot ' + state;
     pillText.className = 'pill-text ' + state;
-    const labels = { disconnected: 'Офлайн', connecting: 'Подключение…', connected: 'Онлайн' };
+    const labels = { disconnected: LANG[currentLang].offline, connecting: LANG[currentLang].connecting, connected: LANG[currentLang].online };
     pillText.textContent = labels[state] || '—';
 
     if (state === 'connected' && room) {
@@ -233,8 +296,9 @@ function applyState(state, room) {
 function renderUsers(users) {
     usersWrap.innerHTML = users.map(u => {
         const me = (u === myUsername);
+        const youLabel = LANG[currentLang].you;
         return '<div class="user-chip' + (me ? ' me' : '') + '">' +
-            '<div class="user-dot"></div>' + esc(u) + (me ? ' (вы)' : '') + '</div>';
+            '<div class="user-dot"></div>' + esc(u) + (me ? ' (' + youLabel + ')' : '') + '</div>';
     }).join('');
 }
 
@@ -258,7 +322,7 @@ function setSpeedActive(speed) {
 
 function renderChatLog(log) {
     if (!log.length) {
-        chatLog.innerHTML = '<div class="chat-empty">Чат пока пуст</div>';
+        chatLog.innerHTML = '<div class="chat-empty">' + LANG[currentLang].chatEmpty + '</div>';
         return;
     }
     const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 12;
