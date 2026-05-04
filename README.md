@@ -158,7 +158,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 | Создание / вход в комнату | Панель комнаты |
 |---|---|
-| ![Вход в комнату](screenshots/join-panel.png) | ![Панель комнаты](screenshots/room-panel.png) |
+| ![Вход в комнату](screenshots/join-panel.jpg) | ![Панель комнаты](screenshots/room-panel.jpg) |
 
 ---
 
