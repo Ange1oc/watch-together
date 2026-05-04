@@ -6,6 +6,12 @@
 
 # 🎬 Watch Together
 
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.2.0-blue?style=flat-square)
+![Manifest](https://img.shields.io/badge/Manifest-V3-orange?style=flat-square&logo=googlechrome&logoColor=white)
+![Node](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square&logo=nodedotjs&logoColor=white)
+![WebSocket](https://img.shields.io/badge/WebSocket-server-purple?style=flat-square)
+
 > Browser extension for synchronized video watching on **any site** — YouTube, HDrezka, Kinopoisk, and more.
 
 Watch the same video with a friend in real time: play, pause, seek, change playback speed, switch episodes, and chat — all perfectly in sync.
@@ -147,6 +153,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <a name="russian"></a>
 
 # 🎬 Watch Together
+
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.2.0-blue?style=flat-square)
+![Manifest](https://img.shields.io/badge/Manifest-V3-orange?style=flat-square&logo=googlechrome&logoColor=white)
+![Node](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square&logo=nodedotjs&logoColor=white)
+![WebSocket](https://img.shields.io/badge/WebSocket-server-purple?style=flat-square)
 
 > Браузерное расширение для совместного просмотра видео на **любом сайте** — YouTube, HDrezka, Кинопоиск и других.
 
