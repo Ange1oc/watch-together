@@ -16,7 +16,7 @@ Watch the same video with a friend in real time: play, pause, seek, change playb
 
 | Join / Create room | Room panel |
 |---|---|
-| ![Join panel](screenshots/join-panel.png) | ![Room panel](screenshots/room-panel.png) |
+| ![Join panel](screenshots/join-panel.jpg) | ![Room panel](screenshots/room-panel.jpg) |
 
 ---
 
