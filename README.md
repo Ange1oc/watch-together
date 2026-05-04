@@ -16,7 +16,7 @@ Watch the same video with a friend in real time: play, pause, seek, change playb
 
 | Join / Create room | Room panel |
 |---|---|
-| ![Join panel](screenshots/join-panel.jpg) | ![Room panel](screenshots/room-panel.jpg) |
+| ![Join panel](screenshots/join.jpg) | ![Room panel](screenshots/room.jpg) |
 
 ---
 
@@ -158,7 +158,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 | Создание / вход в комнату | Панель комнаты |
 |---|---|
-| ![Вход в комнату](screenshots/join-panel.jpg) | ![Панель комнаты](screenshots/room-panel.jpg) |
+| ![Вход в комнату](screenshots/join.jpg) | ![Панель комнаты](screenshots/room.jpg) |
 
 ---
 
